@@ -4,6 +4,7 @@ description: "ESP32 External Flash Memory Manager with LittleFS support"
 url: "https://github.com/Akash-Pugazh/gg_flash_mgr"
 repository: "https://github.com/Akash-Pugazh/gg_flash_mgr.git"
 documentation: "https://github.com/Akash-Pugazh/gg_flash_mgr#readme"  # URL, not a file
+license: "MIT"
 
 dependencies:
   idf:

@@ -1,165 +1,335 @@
 /**
- * @file gg_flash_mgr_config.h
- * @brief Configuration definitions for GG Flash Manager
- * 
- * This file contains default configuration values and compile-time settings.
- * Users can override these in their project's sdkconfig or by defining
- * macros before including the header.
- */
+* @file gg_flash_mgr.h
+* @brief ESP32 External Flash Memory Manager Component
+* @date 2025
+*/
 
 #pragma once
+
+#include "esp_err.h"
+#include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+/**
+* @brief Flash manager configuration structure
+*/
+typedef struct {
+    // SPI Flash Pin Configuration
+    int mosi_pin;
+    int miso_pin;
+    int sclk_pin;
+    int cs_pin;
+    int spi_host;
+    int freq_mhz;
+    
+    // Storage Configuration
+    const char* mount_point;
+    const char* partition_label;
+    const char* data_file;
+    const char* meta_file;
+
+    // Memory Limits
+    uint32_t max_data_size; // How much data storage in the data file in bytes
+    uint32_t chunk_buffer_size; // Max buffer in ram for holding data from flash (default: 4096)
+    
+    // Behavior Configuration
+    bool format_on_init;        // Format filesystem on first initialization
+    bool auto_cleanup;          // Enable automatic cleanup when storage is full
+    float cleanup_threshold;    // Cleanup when storage exceeds this ratio (0.0-1.0)
+    float cleanup_target;       // Target storage ratio after cleanup (0.0-1.0)
+} flash_mgr_config_t;
+
+/**
+* @brief Data entry structure to stored under the data file
+*/
+typedef struct __attribute__((packed)) {
+    uint32_t timestamp;     ///< Entry timestamp
+    uint32_t id;           ///< Unique entry ID
+    uint8_t type;          ///< Data type identifier
+    uint8_t unit;          ///< Data unit identifier
+    int32_t value_x1000;   ///< Value multiplied by 1000 for precision
+    uint8_t reserved[2];   ///< Reserved bytes for alignment
+} flash_mgr_entry_t;
+
+/**
+* @brief Flash manager status information
+*/
+typedef struct {
+    uint32_t total_entries;     ///< Total entries ever written
+    uint32_t active_entries;    ///< Currently active entries
+    uint32_t deleted_entries;   ///< Total entries deleted
+    uint32_t free_space_bytes;  ///< Available storage space in bytes
+    uint32_t used_space_bytes;  ///< Used storage space in bytes
+    bool initialized;           ///< Whether manager is initialized
+} flash_mgr_status_t;
+
+/**
+* @brief Get default configuration
+* 
+* @return Default configuration structure
+*/
+flash_mgr_config_t flash_mgr_get_default_config(void);
+
+/**
+* @brief Initialize flash manager with configuration
+* 
+* @param config Configuration structure
+* @return ESP_OK on success, error code otherwise
+*/
+esp_err_t flash_mgr_init(const flash_mgr_config_t* config);
+
+/**
+* @brief Deinitialize flash manager
+* 
+* @return ESP_OK on success, error code otherwise
+*/
+esp_err_t flash_mgr_deinit(void);
+
+/**
+* @brief Check if flash manager is initialized
+* 
+* @return true if initialized, false otherwise
+*/
+bool flash_mgr_is_initialized(void);
+
+/**
+* @brief Append data entry to flash storage
+* 
+* @param type Data type identifier
+* @param unit Data unit identifier  
+* @param value_x1000 Value multiplied by 1000
+* @return ESP_OK on success, error code otherwise
+*/
+esp_err_t flash_mgr_append(uint8_t type, uint8_t unit, int32_t value_x1000);
+
+/**
+* @brief Append data entry with custom timestamp
+* 
+* @param timestamp Custom timestamp
+* @param type Data type identifier
+* @param unit Data unit identifier
+* @param value_x1000 Value multiplied by 1000
+* @return ESP_OK on success, error code otherwise
+*/
+esp_err_t flash_mgr_append_with_timestamp(uint32_t timestamp, uint8_t type, uint8_t unit, int32_t value_x1000);
+
+/**
+* @brief Read entries in chunks (oldest first)
+* 
+* @param buffer Buffer to store read entries
+* @param max_entries Maximum number of entries to read
+* @param entries_read[out] Number of entries actually read
+* @return ESP_OK on success, error code otherwise
+*/
+esp_err_t flash_mgr_read_chunk(flash_mgr_entry_t* buffer, uint32_t max_entries, uint32_t* entries_read);
+
+/**
+* @brief Delete processed entries from storage
+* 
+* This function actually removes data from the file to free up space.
+* Uses RAM-efficient chunked operations to handle large files.
+* 
+* @param count Number of entries to delete (from oldest probably start of file)
+* @return ESP_OK on success, error code otherwise
+*/
+esp_err_t flash_mgr_delete(uint32_t count);
+
+/**
+* @brief Get current storage status
+* 
+* @param status[out] Status information structure
+* @return ESP_OK on success, error code otherwise
+*/
+esp_err_t flash_mgr_get_status(flash_mgr_status_t* status);
+
+/**
+* @brief Force cleanup of old entries
+* 
+* @param target_entries Target number of entries to keep (probably end of file)
+* @return ESP_OK on success, error code otherwise
+*/
+esp_err_t flash_mgr_cleanup(uint32_t target_entries);
+
+/**
+* @brief Format the storage (WARNING: Deletes all data)
+* 
+* @return ESP_OK on success, error code otherwise
+*/
+esp_err_t flash_mgr_format(void);
+
+/**
+* @brief Get filesystem information
+* 
+* @param total_bytes[out] Total filesystem size
+* @param used_bytes[out] Used filesystem space
+* @return ESP_OK on success, error code otherwise
+*/
+esp_err_t flash_mgr_get_fs_info(size_t* total_bytes, size_t* used_bytes);
+
 // =============================================================================
-// DEFAULT HARDWARE CONFIGURATION
+// UTILITY FUNCTIONS - STANDALONE FILE/DIRECTORY OPERATIONS
 // =============================================================================
 
-#ifndef FLASH_MGR_DEFAULT_MOSI_PIN
-#define FLASH_MGR_DEFAULT_MOSI_PIN      23      ///< Default MOSI pin
-#endif
+/**
+ * @brief File information structure
+ */
+typedef struct {
+    size_t size;        ///< File size in bytes
+    time_t mtime;       ///< Last modification time
+    bool is_directory;  ///< True if this is a directory
+} flash_mgr_file_info_t;
 
-#ifndef FLASH_MGR_DEFAULT_MISO_PIN  
-#define FLASH_MGR_DEFAULT_MISO_PIN      19      ///< Default MISO pin
-#endif
+/**
+ * @brief Directory listing callback function
+ * @param path Full path of the file/directory
+ * @param info File information
+ * @param user_data User-provided data pointer
+ * @return true to continue listing, false to stop
+ */
+typedef bool (*flash_mgr_dir_callback_t)(const char* path, const flash_mgr_file_info_t* info, void* user_data);
 
-#ifndef FLASH_MGR_DEFAULT_SCLK_PIN
-#define FLASH_MGR_DEFAULT_SCLK_PIN      18      ///< Default SCLK pin
-#endif
+// Directory Operations
+/**
+ * @brief Create a directory (supports nested directories)
+ * @param path Directory path (e.g., "/ext/logs/sensors")
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t flash_mgr_util_mkdir(const char* path);
 
-#ifndef FLASH_MGR_DEFAULT_CS_PIN
-#define FLASH_MGR_DEFAULT_CS_PIN        5       ///< Default CS pin
-#endif
+/**
+ * @brief Remove a directory (recursive removal supported)
+ * @param path Directory path to remove
+ * @param recursive If true, removes directory and all contents
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t flash_mgr_util_rmdir(const char* path, bool recursive);
 
-#ifndef FLASH_MGR_DEFAULT_SPI_HOST
-#define FLASH_MGR_DEFAULT_SPI_HOST      2       ///< Default SPI host (VSPI_HOST)
-#endif
+/**
+ * @brief Check if directory exists
+ * @param path Directory path to check
+ * @return true if directory exists, false otherwise
+ */
+bool flash_mgr_util_dir_exists(const char* path);
 
-#ifndef FLASH_MGR_DEFAULT_FREQ_MHZ
-#define FLASH_MGR_DEFAULT_FREQ_MHZ      40      ///< Default SPI frequency
-#endif
+/**
+ * @brief List directory contents
+ * @param path Directory path to list
+ * @param callback Callback function called for each entry
+ * @param user_data User data passed to callback
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t flash_mgr_util_list_dir(const char* path, flash_mgr_dir_callback_t callback, void* user_data);
 
-// =============================================================================
-// DEFAULT STORAGE CONFIGURATION  
-// =============================================================================
+// File Operations
+/**
+ * @brief Write data to file (creates directories if needed)
+ * @param filepath Full file path
+ * @param data Data to write
+ * @param size Size of data in bytes
+ * @param append If true, append to file; if false, overwrite
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t flash_mgr_util_write_file(const char* filepath, const void* data, size_t size, bool append);
 
-#ifndef FLASH_MGR_DEFAULT_MOUNT_POINT
-#define FLASH_MGR_DEFAULT_MOUNT_POINT   "/ext"  ///< Default mount point
-#endif
+/**
+ * @brief Read entire file into buffer
+ * @param filepath Full file path
+ * @param buffer[out] Buffer to store data (allocated by function)
+ * @param size[out] Size of data read
+ * @return ESP_OK on success, error code otherwise
+ * @note Caller must free the returned buffer
+ */
+esp_err_t flash_mgr_util_read_file(const char* filepath, void** buffer, size_t* size);
 
-#ifndef FLASH_MGR_DEFAULT_DATA_FILE
-#define FLASH_MGR_DEFAULT_DATA_FILE     "/ext/data.bin"    ///< Default data file
-#endif
+/**
+ * @brief Write text string to file
+ * @param filepath Full file path
+ * @param text Text string to write
+ * @param append If true, append to file; if false, overwrite
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t flash_mgr_util_write_text(const char* filepath, const char* text, bool append);
 
-#ifndef FLASH_MGR_DEFAULT_META_FILE
-#define FLASH_MGR_DEFAULT_META_FILE     "/ext/meta.bin"    ///< Default metadata file
-#endif
+/**
+ * @brief Read text file into string
+ * @param filepath Full file path
+ * @param text[out] Text string (allocated by function)
+ * @return ESP_OK on success, error code otherwise
+ * @note Caller must free the returned string
+ */
+esp_err_t flash_mgr_util_read_text(const char* filepath, char** text);
 
-#ifndef FLASH_MGR_DEFAULT_PARTITION_LABEL
-#define FLASH_MGR_DEFAULT_PARTITION_LABEL "littlefs_storage"   ///< Default partition label
-#endif
+/**
+ * @brief Delete a file
+ * @param filepath Full file path
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t flash_mgr_util_delete_file(const char* filepath);
 
-// =============================================================================
-// DEFAULT MEMORY LIMITS
-// =============================================================================
+/**
+ * @brief Check if file exists
+ * @param filepath File path to check
+ * @return true if file exists, false otherwise
+ */
+bool flash_mgr_util_file_exists(const char* filepath);
 
-#ifndef FLASH_MGR_DEFAULT_MAX_DATA_SIZE
-#define FLASH_MGR_DEFAULT_MAX_DATA_SIZE (12 * 1024 * 1024) ///< Default 12MB storage limit
-#endif
+/**
+ * @brief Get file information
+ * @param filepath Full file path
+ * @param info[out] File information structure
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t flash_mgr_util_get_file_info(const char* filepath, flash_mgr_file_info_t* info);
 
-#ifndef FLASH_MGR_DEFAULT_CHUNK_BUFFER_SIZE
-#define FLASH_MGR_DEFAULT_CHUNK_BUFFER_SIZE 4096            ///< Default 4KB chunk buffer
-#endif
+/**
+ * @brief Copy a file
+ * @param src_path Source file path
+ * @param dst_path Destination file path
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t flash_mgr_util_copy_file(const char* src_path, const char* dst_path);
 
-// =============================================================================
-// DEFAULT BEHAVIOR CONFIGURATION
-// =============================================================================
+/**
+ * @brief Move/rename a file
+ * @param old_path Current file path
+ * @param new_path New file path
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t flash_mgr_util_move_file(const char* old_path, const char* new_path);
 
-#ifndef FLASH_MGR_DEFAULT_FORMAT_ON_INIT
-#define FLASH_MGR_DEFAULT_FORMAT_ON_INIT    false           ///< Don't format by default
-#endif
+// Advanced File Operations
+/**
+ * @brief Calculate file checksum (CRC32)
+ * @param filepath Full file path
+ * @param checksum[out] Calculated CRC32 checksum
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t flash_mgr_util_file_checksum(const char* filepath, uint32_t* checksum);
 
-#ifndef FLASH_MGR_DEFAULT_AUTO_CLEANUP
-#define FLASH_MGR_DEFAULT_AUTO_CLEANUP      true            ///< Enable auto cleanup
-#endif
+/**
+ * @brief Get directory size (recursive)
+ * @param path Directory path
+ * @param total_size[out] Total size in bytes
+ * @param file_count[out] Number of files (optional, can be NULL)
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t flash_mgr_util_get_dir_size(const char* path, size_t* total_size, uint32_t* file_count);
 
-#ifndef FLASH_MGR_DEFAULT_CLEANUP_THRESHOLD
-#define FLASH_MGR_DEFAULT_CLEANUP_THRESHOLD 0.95f           ///< Cleanup at 95% full
-#endif
-
-#ifndef FLASH_MGR_DEFAULT_CLEANUP_TARGET
-#define FLASH_MGR_DEFAULT_CLEANUP_TARGET    0.75f           ///< Target 75% after cleanup
-#endif
-
-// =============================================================================
-// COMPILE-TIME LIMITS AND VALIDATION
-// =============================================================================
-
-#ifndef FLASH_MGR_MAX_CHUNK_BUFFER_SIZE
-#define FLASH_MGR_MAX_CHUNK_BUFFER_SIZE (64 * 1024)         ///< Maximum chunk buffer size
-#endif
-
-#ifndef FLASH_MGR_MIN_CHUNK_BUFFER_SIZE  
-#define FLASH_MGR_MIN_CHUNK_BUFFER_SIZE 1024                ///< Minimum chunk buffer size
-#endif
-
-#ifndef FLASH_MGR_MAX_DATA_SIZE
-#define FLASH_MGR_MAX_DATA_SIZE         (16 * 1024 * 1024)  ///< Maximum data size (16MB)
-#endif
-
-#ifndef FLASH_MGR_MIN_DATA_SIZE
-#define FLASH_MGR_MIN_DATA_SIZE         1024                ///< Minimum data size (1KB)
-#endif
-
-// =============================================================================
-// LOGGING CONFIGURATION
-// =============================================================================
-
-#ifndef FLASH_MGR_LOG_TAG
-#define FLASH_MGR_LOG_TAG               "flash_mgr"         ///< Log tag
-#endif
-
-#ifndef FLASH_MGR_ENABLE_DEBUG_LOGS
-#define FLASH_MGR_ENABLE_DEBUG_LOGS     0                   ///< Enable debug logging
-#endif
-
-#ifndef FLASH_MGR_PROGRESS_LOG_INTERVAL
-#define FLASH_MGR_PROGRESS_LOG_INTERVAL (10 * 4096)         ///< Progress log every 40KB
-#endif
-
-// =============================================================================
-// ENTRY STRUCTURE CONFIGURATION
-// =============================================================================
-
-#ifndef FLASH_MGR_ENTRY_SIZE
-#define FLASH_MGR_ENTRY_SIZE            18                  ///< Size of data entry in bytes
-#endif
-
-// =============================================================================
-// VALIDATION MACROS
-// =============================================================================
-
-#if FLASH_MGR_DEFAULT_CHUNK_BUFFER_SIZE > FLASH_MGR_MAX_CHUNK_BUFFER_SIZE
-#error "Default chunk buffer size exceeds maximum allowed"
-#endif
-
-#if FLASH_MGR_DEFAULT_CHUNK_BUFFER_SIZE < FLASH_MGR_MIN_CHUNK_BUFFER_SIZE
-#error "Default chunk buffer size is below minimum required"
-#endif
-
-#if FLASH_MGR_DEFAULT_MAX_DATA_SIZE > FLASH_MGR_MAX_DATA_SIZE
-#error "Default data size exceeds maximum allowed"
-#endif
-
-#if FLASH_MGR_DEFAULT_MAX_DATA_SIZE < FLASH_MGR_MIN_DATA_SIZE
-#error "Default data size is below minimum required"
-#endif
-
-#if FLASH_MGR_DEFAULT_CLEANUP_THRESHOLD <= FLASH_MGR_DEFAULT_CLEANUP_TARGET
-#error "Cleanup threshold must be greater than cleanup target"
-#endif
+/**
+ * @brief Find files matching pattern
+ * @param base_path Base directory to search
+ * @param pattern File pattern (supports * and ? wildcards)
+ * @param recursive Search subdirectories
+ * @param callback Callback for each matching file
+ * @param user_data User data for callback
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t flash_mgr_util_find_files(const char* base_path, const char* pattern, bool recursive, 
+                                   flash_mgr_dir_callback_t callback, void* user_data);
 
 #ifdef __cplusplus
 }
