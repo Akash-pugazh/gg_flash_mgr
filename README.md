@@ -6,10 +6,6 @@
 [![Platform](https://img.shields.io/badge/Platform-ESP32-green.svg)](https://www.espressif.com/en/products/socs/esp32)
 [![Version](https://img.shields.io/badge/Version-1.0.0-orange.svg)](https://github.com/your-team/gg_flash_mgr)
 
-> **"Because your IoT data deserves this!"** ⚡
-
-## ✨ What's This Beast?
-
 GG Flash Manager is for managing external SPI flash memory on ESP32 devices.
 
 ### 🎯 Core Features
