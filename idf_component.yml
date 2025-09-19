@@ -1,0 +1,18 @@
+## IDF Component Manager Manifest File
+version: "1.0.0"
+description: "ESP32 External Flash Memory Manager with LittleFS support"
+url: "https://github.com/Akash-Pugazh/gg_flash_mgr"
+repository: "https://github.com/Akash-Pugazh/gg_flash_mgr.git"
+documentation: "https://github.com/Akash-Pugazh/gg_flash_mgr#readme"  # URL, not a file
+
+dependencies:
+  idf:
+    version: '>=4.1.0'
+  joltwallet/littlefs: ^1.20.1
+
+targets:
+  - esp32
+  - esp32s2
+  - esp32s3
+  - esp32c3
+  - esp32c6
