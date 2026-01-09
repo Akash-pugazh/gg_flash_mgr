@@ -2,11 +2,11 @@ name: "CodeQL Advanced"
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
   schedule:
-    - cron: '26 9 * * 4'  # Weekly on Thursday at 9:26 AM UTC
+    - cron: "26 9 * * 4" # Weekly on Thursday at 9:26 AM UTC
 
 jobs:
   analyze:
@@ -25,50 +25,72 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - language: c-cpp
-          build-mode: manual
+          - language: c-cpp
+            build-mode: manual
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        submodules: 'recursive'
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: "recursive"
 
-    - name: Setup ESP-IDF v5.5.1
-      uses: espressif/esp-idf-ci-action@v1
-      with:
-        esp_idf_version: v5.5.1
-        target: esp32s3
+      # Initializes the CodeQL tools for scanning.
+      # This MUST happen before ESP-IDF setup to ensure tracing environment is set up correctly.
+      # CodeQL sets up environment variables that will trace compilation commands.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        id: init
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # Optional: Add custom queries for security and quality
+          # queries: security-extended,security-and-quality
 
-    # Initializes the CodeQL tools for scanning.
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@v4
-      with:
-        languages: ${{ matrix.language }}
-        build-mode: ${{ matrix.build-mode }}
-        # Optional: Add custom queries for security and quality
-        # queries: security-extended,security-and-quality
+      - name: Setup ESP-IDF v5.5.1
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.1
+          target: esp32s3
 
-    # Build the codebase to create a database for CodeQL analysis.
-    # This step is required for manual build mode.
-    - name: Build codebase for CodeQL
-      shell: bash
-      run: |
-        . $IDF_PATH/export.sh
-        
-        echo "=== Building codebase for CodeQL analysis ==="
-        echo "Target: ESP32-S3"
-        echo "ESP-IDF Version: v5.5.1"
-        echo ""
-        
-        # Build the project
-        # CodeQL will automatically trace the build process
-        idf.py build
-        
-        echo "✅ Build completed successfully"
+      # Build the codebase to create a database for CodeQL analysis.
+      # This step is required for manual build mode.
+      # CodeQL automatically sets up environment variables during init that trace compilation.
+      # The build must happen after both CodeQL init and ESP-IDF setup.
+      - name: Build codebase for CodeQL
+        shell: bash
+        run: |
+          set -e
 
-    # Performs CodeQL analysis
-    - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v4
-      with:
-        category: "/language:${{matrix.language}}"
+          # Source ESP-IDF environment
+          # CodeQL's tracing environment (set up in init step) will be preserved
+          . $IDF_PATH/export.sh
+
+          echo "=== Building codebase for CodeQL analysis ==="
+          echo "Target: ESP32-S3"
+          echo "ESP-IDF Version: v5.5.1"
+          echo "Build mode: Manual (CodeQL tracing enabled)"
+          echo ""
+
+          # CodeQL sets up tracing automatically via environment variables from init step
+          # All compilation commands executed during this build will be traced
+          echo "Starting ESP-IDF build..."
+          echo "CodeQL will automatically trace all compilation commands"
+          idf.py build
+
+          echo "✅ Build completed successfully"
+
+          # Verify build artifacts
+          if [ -f "build/gg_lte_hub.bin" ]; then
+            echo "✅ Build artifacts verified"
+          else
+            echo "⚠️  Warning: Expected build artifacts not found"
+          fi
+
+      # Performs CodeQL analysis on the traced build database
+      # CodeQL will automatically find the database created during the build step
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{matrix.language}}"
+          # Optional: Add upload parameter if you want to control when results are uploaded
+          # upload: true
